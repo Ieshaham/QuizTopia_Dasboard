@@ -16,6 +16,7 @@ export default function AuthScreen() {
 
   const navigate = useNavigate();
 
+  
   const handleInputChange = (e) => {
     setFormData({
       ...formData,
