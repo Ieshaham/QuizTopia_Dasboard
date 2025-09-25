@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
+import QuizCreationModal from './quizCreation';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize the Supabase client with the correct anon key
+const supabase = createClient(
+  'https://kypfswyeviskcfkksekp.supabase.co', 
+  'sb_publishable_HdnnG-pBApERIT9D0kctBA_oI1sSbPJ'
+);
 
 const QuizTopiaDashboard = () => {
   const [selectedStudent, setSelectedStudent] = useState('emma');
+  const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
 
   // Simple sample data
   const students = [
@@ -26,6 +35,142 @@ const QuizTopiaDashboard = () => {
   ];
 
   const currentStudent = students.find(s => s.id === selectedStudent);
+
+  // Full Supabase submit function
+  const submitQuizToSupabase = async ({ newLesson, questions }) => {
+    try {
+      console.log('Submitting quiz to Supabase:', { newLesson, questions });
+      
+      // Option 1: Try to create an anonymous session first
+      const { data: { session }, error: authError } = await supabase.auth.signInAnonymously();
+      
+      let userId;
+      if (session?.user?.id) {
+        userId = session.user.id;
+        console.log('Using anonymous user:', userId);
+      } else {
+        // Option 2: If anonymous auth fails, use service role bypass
+        console.warn('Anonymous auth failed, using demo UUID:', authError);
+        userId = '550e8400-e29b-41d4-a716-446655440000';
+      }
+      
+      // 1. Create lesson first
+      const { data: lessonData, error: lessonError } = await supabase
+        .from('lessons')
+        .insert({
+          title: newLesson.title,
+          subject: newLesson.subject,
+          grade_level: parseInt(newLesson.gradeLevel),
+          description: newLesson.description,
+          duration_minutes: 15,
+          created_by: userId,
+          is_active: true
+        })
+        .select()
+        .single();
+      
+      if (lessonError) {
+        console.error('Lesson creation error:', lessonError);
+        throw lessonError;
+      }
+      
+      console.log('Lesson created:', lessonData);
+      
+      // 2. Create questions for this lesson
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
+        
+        // Upload video if exists
+        let videoUrl = null;
+        let videoThumbnailUrl = null;
+        
+        if (question.videoFile) {
+          try {
+            const fileExt = question.videoFile.name.split('.').pop();
+            const fileName = `${lessonData.id}/${Date.now()}.${fileExt}`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('lesson-videos')
+              .upload(fileName, question.videoFile);
+            
+            if (uploadError) {
+              console.error('Video upload error:', uploadError);
+            } else {
+              const { data: { publicUrl } } = supabase.storage
+                .from('lesson-videos')
+                .getPublicUrl(uploadData.path);
+              videoUrl = publicUrl;
+            }
+          } catch (videoError) {
+            console.error('Video processing error:', videoError);
+          }
+        }
+        
+        // Convert difficulty level to integer (1-5)
+        const difficultyMap = {
+          'easy': 1,
+          'medium': 3,
+          'hard': 5
+        };
+        
+        // Insert question
+        const { data: questionData, error: questionError } = await supabase
+          .from('questions')
+          .insert({
+            lesson_id: lessonData.id,
+            question_text: question.questionText,
+            question_type: question.questionType,
+            correct_answer: question.correctAnswer,
+            explanation: question.explanation || null,
+            video_url: videoUrl,
+            video_thumbnail_url: videoThumbnailUrl,
+            difficulty_level: difficultyMap[question.difficultyLevel] || 3,
+            order_position: i + 1
+          })
+          .select()
+          .single();
+        
+        if (questionError) {
+          console.error('Question creation error:', questionError);
+          throw questionError;
+        }
+        
+        console.log('Question created:', questionData);
+        
+        // 3. Insert answer choices for multiple choice questions
+        if (question.questionType === 'multiple_choice' && question.answerChoices) {
+          const choices = question.answerChoices
+            .filter(choice => choice && choice.trim())
+            .map((choice, index) => ({
+              question_id: questionData.id,
+              choice_text: choice.trim(),
+              is_correct: choice.trim() === question.correctAnswer.trim(),
+              choice_order: index + 1
+            }));
+          
+          if (choices.length > 0) {
+            const { error: choicesError } = await supabase
+              .from('answer_choices')
+              .insert(choices);
+            
+            if (choicesError) {
+              console.error('Answer choices creation error:', choicesError);
+              throw choicesError;
+            }
+            
+            console.log('Answer choices created:', choices);
+          }
+        }
+      }
+      
+      alert(`Quiz "${newLesson.title}" created successfully with ${questions.length} questions and saved to Supabase!`);
+      
+    } catch (error) {
+      console.error('Error creating quiz:', error);
+      alert(`Error creating quiz: ${error.message}`);
+      throw error;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
@@ -149,7 +294,14 @@ const QuizTopiaDashboard = () => {
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={weeklyScores}>
+              <LineChart data={weeklyScores} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="progressGradient" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="50%" stopColor="#8b5cf6" />
+                    <stop offset="100%" stopColor="#ec4899" />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="day" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" />
@@ -163,18 +315,11 @@ const QuizTopiaDashboard = () => {
                 <Line 
                   type="monotone" 
                   dataKey="score" 
-                  stroke="url(#progressGradient)" 
+                  stroke="#8b5cf6" 
                   strokeWidth={4}
                   dot={{ fill: '#8b5cf6', strokeWidth: 3, r: 6 }}
                   activeDot={{ r: 8, fill: '#a855f7' }}
                 />
-                <defs>
-                  <linearGradient id="progressGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="50%" stopColor="#8b5cf6" />
-                    <stop offset="100%" stopColor="#ec4899" />
-                  </linearGradient>
-                </defs>
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -202,7 +347,7 @@ const QuizTopiaDashboard = () => {
             </div>
           </div>
 
-          {/* Simple AI Recommendation */}
+          {/* Simple AI Recommendation with Create Quiz Button */}
           <div className="bg-gradient-to-br from-yellow-100 via-amber-100 to-orange-100 rounded-2xl p-6 border-2 border-yellow-300 shadow-xl">
             <div className="flex items-center space-x-3 mb-4">
               <div className="w-10 h-10 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg animate-bounce">
@@ -215,12 +360,22 @@ const QuizTopiaDashboard = () => {
               <p className="text-gray-800 font-medium">Focus on multiplication tables - this will help improve {currentStudent?.name.split(' ')[0]}'s math scores! 🚀</p>
             </div>
             
-            <button className="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg">
+            <button 
+              onClick={() => setIsQuizModalOpen(true)}
+              className="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg"
+            >
               ✨ Create Practice Quiz
             </button>
           </div>
         </div>
       </div>
+
+      {/* Quiz Creation Modal */}
+      <QuizCreationModal 
+        isOpen={isQuizModalOpen}
+        onClose={() => setIsQuizModalOpen(false)}
+        onSubmit={submitQuizToSupabase}
+      />
     </div>
   );
 };
