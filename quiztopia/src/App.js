@@ -4,6 +4,8 @@ import QuizTopiaDashboard from './components/dashboard';
 import QuizCreationModal from './components/quizCreation';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
+import GenerateQuestionsPage from './components/generateQuestionsPage';
+
 function App() {
   return (
     <Router>
@@ -11,6 +13,8 @@ function App() {
         <Route path="/" element={<AuthScreen />} />
         <Route path="/dashboard" element={<QuizTopiaDashboard />} />
         <Route path="/quizCreation" element={<QuizCreationModal />} />
+        <Route path="/generate-questions" element={<GenerateQuestionsPage />} />
+
       </Routes>
     </Router>
   );

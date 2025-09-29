@@ -3,8 +3,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
 import QuizCreationModal from './quizCreation';
 import { createClient } from '@supabase/supabase-js';
+import { useNavigate } from 'react-router-dom';
 
-// Initialize the Supabase client with the correct anon key
+// Initialize the Supabase client
 const supabase = createClient(
   'https://kypfswyeviskcfkksekp.supabase.co', 
   'sb_publishable_HdnnG-pBApERIT9D0kctBA_oI1sSbPJ'
@@ -13,8 +14,9 @@ const supabase = createClient(
 const QuizTopiaDashboard = () => {
   const [selectedStudent, setSelectedStudent] = useState('emma');
   const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+  const navigate = useNavigate();
 
-  // Simple sample data
+  // Sample data
   const students = [
     { id: 'emma', name: 'Emma Johnson', age: 8 },
     { id: 'alex', name: 'Alex Johnson', age: 10 }
@@ -36,25 +38,14 @@ const QuizTopiaDashboard = () => {
 
   const currentStudent = students.find(s => s.id === selectedStudent);
 
-  // Full Supabase submit function
+  // Supabase submit function
   const submitQuizToSupabase = async ({ newLesson, questions }) => {
     try {
-      console.log('Submitting quiz to Supabase:', { newLesson, questions });
-      
-      // Option 1: Try to create an anonymous session first
+      console.log('Submitting quiz:', { newLesson, questions });
       const { data: { session }, error: authError } = await supabase.auth.signInAnonymously();
-      
-      let userId;
-      if (session?.user?.id) {
-        userId = session.user.id;
-        console.log('Using anonymous user:', userId);
-      } else {
-        // Option 2: If anonymous auth fails, use service role bypass
-        console.warn('Anonymous auth failed, using demo UUID:', authError);
-        userId = '550e8400-e29b-41d4-a716-446655440000';
-      }
-      
-      // 1. Create lesson first
+      const userId = session?.user?.id || '550e8400-e29b-41d4-a716-446655440000';
+
+      // 1. Create lesson
       const { data: lessonData, error: lessonError } = await supabase
         .from('lessons')
         .insert({
@@ -68,52 +59,24 @@ const QuizTopiaDashboard = () => {
         })
         .select()
         .single();
-      
-      if (lessonError) {
-        console.error('Lesson creation error:', lessonError);
-        throw lessonError;
-      }
-      
-      console.log('Lesson created:', lessonData);
-      
-      // 2. Create questions for this lesson
+      if (lessonError) throw lessonError;
+
+      // 2. Create questions
       for (let i = 0; i < questions.length; i++) {
         const question = questions[i];
-        
-        // Upload video if exists
         let videoUrl = null;
-        let videoThumbnailUrl = null;
-        
+
         if (question.videoFile) {
-          try {
-            const fileExt = question.videoFile.name.split('.').pop();
-            const fileName = `${lessonData.id}/${Date.now()}.${fileExt}`;
-            
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('lesson-videos')
-              .upload(fileName, question.videoFile);
-            
-            if (uploadError) {
-              console.error('Video upload error:', uploadError);
-            } else {
-              const { data: { publicUrl } } = supabase.storage
-                .from('lesson-videos')
-                .getPublicUrl(uploadData.path);
-              videoUrl = publicUrl;
-            }
-          } catch (videoError) {
-            console.error('Video processing error:', videoError);
-          }
+          const fileExt = question.videoFile.name.split('.').pop();
+          const fileName = `${lessonData.id}/${Date.now()}.${fileExt}`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('lesson-videos')
+            .upload(fileName, question.videoFile);
+          if (uploadError) console.error('Video upload error:', uploadError);
+          else videoUrl = supabase.storage.from('lesson-videos').getPublicUrl(uploadData.path).data.publicUrl;
         }
-        
-        // Convert difficulty level to integer (1-5)
-        const difficultyMap = {
-          'easy': 1,
-          'medium': 3,
-          'hard': 5
-        };
-        
-        // Insert question
+
+        const difficultyMap = { easy: 1, medium: 3, hard: 5 };
         const { data: questionData, error: questionError } = await supabase
           .from('questions')
           .insert({
@@ -123,21 +86,14 @@ const QuizTopiaDashboard = () => {
             correct_answer: question.correctAnswer,
             explanation: question.explanation || null,
             video_url: videoUrl,
-            video_thumbnail_url: videoThumbnailUrl,
             difficulty_level: difficultyMap[question.difficultyLevel] || 3,
             order_position: i + 1
           })
           .select()
           .single();
-        
-        if (questionError) {
-          console.error('Question creation error:', questionError);
-          throw questionError;
-        }
-        
-        console.log('Question created:', questionData);
-        
-        // 3. Insert answer choices for multiple choice questions
+        if (questionError) throw questionError;
+
+        // Insert answer choices if multiple choice
         if (question.questionType === 'multiple_choice' && question.answerChoices) {
           const choices = question.answerChoices
             .filter(choice => choice && choice.trim())
@@ -147,47 +103,29 @@ const QuizTopiaDashboard = () => {
               is_correct: choice.trim() === question.correctAnswer.trim(),
               choice_order: index + 1
             }));
-          
           if (choices.length > 0) {
-            const { error: choicesError } = await supabase
-              .from('answer_choices')
-              .insert(choices);
-            
-            if (choicesError) {
-              console.error('Answer choices creation error:', choicesError);
-              throw choicesError;
-            }
-            
-            console.log('Answer choices created:', choices);
+            const { error: choicesError } = await supabase.from('answer_choices').insert(choices);
+            if (choicesError) throw choicesError;
           }
         }
       }
-      
-      alert(`Quiz "${newLesson.title}" created successfully with ${questions.length} questions and saved to Supabase!`);
-      
+
+      alert(`Quiz "${newLesson.title}" created successfully!`);
     } catch (error) {
       console.error('Error creating quiz:', error);
       alert(`Error creating quiz: ${error.message}`);
-      throw error;
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Modern Header */}
+      {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-purple-200 px-6 py-4 shadow-lg">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <img 
-                src="/quiztopia-logo.png" 
-                alt="QuizTopia Logo" 
-                className="w-10 h-10 object-contain"
-              />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
-            </div>
+          <div className="flex items-center space-x-2">
+            <img src="/quiztopia-logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
           </div>
-          
           <div className="flex items-center space-x-4">
             <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
             <Settings className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
@@ -219,9 +157,9 @@ const QuizTopiaDashboard = () => {
           </select>
         </div>
 
-        {/* Simple Key Metrics - 3 Cards Only */}
+        {/* Key Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {/* Overall Performance */}
+          {/* Average Score */}
           <div className="bg-gradient-to-br from-white to-yellow-50 rounded-2xl p-6 shadow-xl border border-yellow-200 hover:shadow-2xl hover:scale-105 transition-all duration-300">
             <div className="flex items-center justify-between">
               <div>
@@ -287,11 +225,9 @@ const QuizTopiaDashboard = () => {
           </div>
         </div>
 
-        {/* Simple Progress Chart */}
+        {/* Weekly Progress Chart */}
         <div className="bg-gradient-to-br from-white to-indigo-50 rounded-2xl p-6 shadow-xl border border-indigo-200 mb-8">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-            📈 This Week's Progress
-          </h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">📈 This Week's Progress</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={weeklyScores} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -306,32 +242,19 @@ const QuizTopiaDashboard = () => {
                 <XAxis dataKey="day" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" />
                 <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#fff', 
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px'
-                  }} 
+                  contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} 
                 />
-                <Line 
-                  type="monotone" 
-                  dataKey="score" 
-                  stroke="#8b5cf6" 
-                  strokeWidth={4}
-                  dot={{ fill: '#8b5cf6', strokeWidth: 3, r: 6 }}
-                  activeDot={{ r: 8, fill: '#a855f7' }}
-                />
+                <Line type="monotone" dataKey="score" stroke="url(#progressGradient)" strokeWidth={4} dot={{ r: 6 }} activeDot={{ r: 8 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Recent Activity & AI Tip */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Quiz Results */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Recent Quizzes */}
           <div className="bg-gradient-to-br from-white to-pink-50 rounded-2xl p-6 shadow-xl border border-pink-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-              🎯 Recent Quizzes
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">🎯 Recent Quizzes</h3>
             <div className="space-y-4">
               {recentQuizzes.map((quiz, index) => (
                 <div key={index} className="flex items-center justify-between p-4 border border-pink-100 rounded-xl hover:bg-pink-50 transition-all hover:scale-102 bg-white/50 backdrop-blur-sm">
@@ -347,7 +270,7 @@ const QuizTopiaDashboard = () => {
             </div>
           </div>
 
-          {/* Simple AI Recommendation with Create Quiz Button */}
+          {/* AI Tip + Buttons */}
           <div className="bg-gradient-to-br from-yellow-100 via-amber-100 to-orange-100 rounded-2xl p-6 border-2 border-yellow-300 shadow-xl">
             <div className="flex items-center space-x-3 mb-4">
               <div className="w-10 h-10 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg animate-bounce">
@@ -357,9 +280,18 @@ const QuizTopiaDashboard = () => {
             </div>
             
             <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-yellow-300 mb-4 shadow-lg">
-              <p className="text-gray-800 font-medium">Focus on multiplication tables - this will help improve {currentStudent?.name.split(' ')[0]}'s math scores! 🚀</p>
+              <p className="text-gray-800 font-medium">
+                Focus on multiplication tables - this will help improve {currentStudent?.name.split(' ')[0]}'s math scores! 🚀
+              </p>
             </div>
-            
+
+            <button
+              onClick={() => navigate('/generate-questions')}
+              className="w-full mb-3 bg-gradient-to-r from-green-400 to-teal-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg"
+            >
+              📝 Generate AI Questions
+            </button>
+
             <button 
               onClick={() => setIsQuizModalOpen(true)}
               className="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg"
@@ -368,14 +300,14 @@ const QuizTopiaDashboard = () => {
             </button>
           </div>
         </div>
-      </div>
 
-      {/* Quiz Creation Modal */}
-      <QuizCreationModal 
-        isOpen={isQuizModalOpen}
-        onClose={() => setIsQuizModalOpen(false)}
-        onSubmit={submitQuizToSupabase}
-      />
+        {/* Quiz Modal */}
+        <QuizCreationModal 
+          isOpen={isQuizModalOpen}
+          onClose={() => setIsQuizModalOpen(false)}
+          onSubmit={submitQuizToSupabase}
+        />
+      </div>
     </div>
   );
 };
