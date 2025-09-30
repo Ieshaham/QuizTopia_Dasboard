@@ -276,7 +276,7 @@ const QuizTopiaDashboard = () => {
               <div className="w-10 h-10 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg animate-bounce">
                 <Brain className="w-6 h-6 text-white" />
               </div>
-              <h3 className="text-lg font-bold text-gray-800">🧠 AI Smart Tip</h3>
+              <h3 className="text-lg font-bold text-gray-800">AI Smart Tip</h3>
             </div>
             
             <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-yellow-300 mb-4 shadow-lg">
