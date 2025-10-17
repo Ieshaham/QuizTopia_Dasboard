@@ -3,6 +3,7 @@ import AuthScreen from './components/auth';
 import QuizTopiaDashboard from './components/dashboard';
 import QuizCreationModal from './components/quizCreation';
 import QuestionApprovalPage from './components/questionApprovalPage';
+import SettingsPage from './components/settings';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 import GenerateQuestionsPage from './components/generateQuestionsPage';
@@ -16,6 +17,7 @@ function App() {
         <Route path="/quizCreation" element={<QuizCreationModal />} />
         <Route path="/generate-questions" element={<GenerateQuestionsPage />} />
         <Route path="/approval" element={<QuestionApprovalPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
 
       </Routes>
     </Router>

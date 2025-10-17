@@ -128,7 +128,11 @@ const QuizTopiaDashboard = () => {
           </div>
           <div className="flex items-center space-x-4">
             <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
-            <Settings className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
+            <Settings
+              className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110"
+              onClick={() => navigate('/settings')}
+              />
+
             <div className="flex items-center space-x-2">
               <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
                 <User className="w-5 h-5 text-white" />
