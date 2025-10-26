@@ -1,13 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Settings, Bell, PlusCircle } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
+import { User, Settings, Bell, PlusCircle, ArrowLeft } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
-// Initialize Supabase client
-const supabase = createClient(
-  'https://kypfswyeviskcfkksekp.supabase.co', 
-  'sb_publishable_HdnnG-pBApERIT9D0kctBA_oI1sSbPJ'
-);
 
 const SettingsPage = () => {
   const navigate = useNavigate();
@@ -118,9 +113,18 @@ const SettingsPage = () => {
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-purple-200 px-6 py-4 shadow-lg">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <img src="/quiztopia-logo.png" alt="Logo" className="w-10 h-10 object-contain" />
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center space-x-2 text-gray-600 hover:text-purple-600 transition-all"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-sm font-medium">Back</span>
+            </button>
+            <div className="flex items-center space-x-2">
+              <img src="/quiztopia-logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
+            </div>
           </div>
           <div className="flex items-center space-x-4">
             <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />

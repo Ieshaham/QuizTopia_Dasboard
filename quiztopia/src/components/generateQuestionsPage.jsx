@@ -1,12 +1,7 @@
 import React, { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from './supabaseClient';
 import { Brain, Sparkles, BookOpen, XCircle, Loader, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
 
 const GenerateQuestionsPage = () => {
   const navigate = useNavigate();
@@ -31,33 +26,25 @@ const GenerateQuestionsPage = () => {
     setError("");
 
     try {
-      // Call the Supabase Edge Function
+      // Invoke Supabase Edge Function with JSON string body
       const { data, error: fnError } = await supabase.functions.invoke(
         "generate-questions",
         {
-          body: { 
+          body: JSON.stringify({ 
             subject, 
             grade_level: parseInt(grade), 
             num_questions: parseInt(numQuestions),
             lesson_id: null,
             parent_id: null
-          }
+          }),
         }
       );
 
-      if (fnError) {
-        throw new Error(fnError.message);
-      }
+      if (fnError) throw new Error(fnError.message);
 
       if (data?.success) {
         console.log("Questions received from Grok API:", data.questions);
-        console.log("Navigating to approval page with:", {
-          questions: data.questions,
-          subject: subject,
-          grade: grade
-        });
-        
-        // Navigate to approval page with the real Grok API questions
+
         navigate('/approval', { 
           state: { 
             questions: data.questions || [],
@@ -65,10 +52,10 @@ const GenerateQuestionsPage = () => {
             grade: grade
           } 
         });
-        
       } else {
         setError(data?.error || "Failed to generate questions");
       }
+
     } catch (err) {
       console.error("Error:", err);
       setError(err.message || "Something went wrong");
@@ -112,6 +99,7 @@ const GenerateQuestionsPage = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            {/* Subject Input */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Subject *
@@ -125,6 +113,7 @@ const GenerateQuestionsPage = () => {
               />
             </div>
 
+            {/* Grade Input */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Grade Level *
@@ -135,21 +124,13 @@ const GenerateQuestionsPage = () => {
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
               >
                 <option value="">Select Grade</option>
-                <option value="1">Grade 1</option>
-                <option value="2">Grade 2</option>
-                <option value="3">Grade 3</option>
-                <option value="4">Grade 4</option>
-                <option value="5">Grade 5</option>
-                <option value="6">Grade 6</option>
-                <option value="7">Grade 7</option>
-                <option value="8">Grade 8</option>
-                <option value="9">Grade 9</option>
-                <option value="10">Grade 10</option>
-                <option value="11">Grade 11</option>
-                <option value="12">Grade 12</option>
+                {Array.from({ length: 12 }, (_, i) => (
+                  <option key={i+1} value={i+1}>Grade {i+1}</option>
+                ))}
               </select>
             </div>
 
+            {/* Number of Questions */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Number of Questions *
@@ -165,6 +146,7 @@ const GenerateQuestionsPage = () => {
             </div>
           </div>
 
+          {/* Generate Button */}
           <button
             onClick={handleGenerate}
             disabled={loading || !subject || !grade || !numQuestions}
@@ -173,7 +155,7 @@ const GenerateQuestionsPage = () => {
             {loading ? (
               <>
                 <Loader className="w-5 h-5 animate-spin" />
-                <span>Generating Questions with Grok AI...</span>
+                <span>Generating Questions...</span>
               </>
             ) : (
               <>

@@ -11,12 +11,12 @@ export default function AuthScreen() {
     name: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    role: 'child' // default role for signup
   });
 
   const navigate = useNavigate();
 
-  
   const handleInputChange = (e) => {
     setFormData({
       ...formData,
@@ -28,7 +28,9 @@ export default function AuthScreen() {
     e.preventDefault();
 
     if (isLogin) {
-      // SIGN IN
+      // --------------------
+      // LOGIN
+      // --------------------
       const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password
@@ -36,14 +38,34 @@ export default function AuthScreen() {
 
       if (error) {
         alert(error.message);
-      } else {
-        console.log('Logged in user:', data.user);
-        alert(`Welcome back, ${data.user.email}`);
+        return;
+      }
+
+      // Fetch user profile to determine role
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileError || !profileData) {
+        alert('Error fetching user profile');
+        return;
+      }
+
+      // Navigate based on role
+      if (profileData.role === 'child') {
+        navigate('/gaming'); // Show subject selection screen
+      } else if (profileData.role === 'parent') {
         navigate('/dashboard');
+      } else {
+        navigate('/dashboard'); // fallback
       }
 
     } else {
-      // SIGN UP
+      // --------------------
+      // SIGNUP
+      // --------------------
       if (formData.password !== formData.confirmPassword) {
         alert("Passwords don't match!");
         return;
@@ -56,11 +78,31 @@ export default function AuthScreen() {
 
       if (error) {
         alert(error.message);
-      } else {
-        console.log('Signed up user:', data.user);
-        alert("Account created! Please check your email to confirm.");
-        setIsLogin(true); // switch to login after sign up
+        return;
       }
+
+      const userId = data.user.id;
+
+      // Insert into user_profiles
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .insert([
+          {
+            id: userId,
+            role: formData.role,
+            display_name: formData.name,
+            parent_id: null // adjust if parent creates child
+          }
+        ]);
+
+      if (profileError) {
+        console.error(profileError);
+        alert("Error creating user profile");
+        return;
+      }
+
+      alert("Account created! Please check your email to confirm.");
+      setIsLogin(true); // switch to login after sign-up
     }
   };
 
@@ -70,7 +112,8 @@ export default function AuthScreen() {
       name: '',
       email: '',
       password: '',
-      confirmPassword: ''
+      confirmPassword: '',
+      role: 'child'
     });
   };
 
@@ -85,17 +128,12 @@ export default function AuthScreen() {
 
       <div className="relative w-full max-w-md">
         <div className="bg-white/95 backdrop-blur-xl border border-white/30 rounded-3xl shadow-2xl p-6 relative overflow-hidden">
-          {/* Top gradient line */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-400 via-blue-500 to-yellow-400"></div>
           
           {/* Header */}
           <div className="text-center mb-6">
             <div className="w-16 h-16 mx-auto mb-3 flex items-center justify-center">
-              <img 
-                src="/quiztopia-logo.png" 
-                alt="QuizTopia Logo" 
-                className="w-full h-full object-contain rounded-2xl"
-              />
+              <img src="/quiztopia-logo.png" alt="QuizTopia Logo" className="w-full h-full object-contain rounded-2xl" />
             </div>
             <h1 className="text-2xl font-bold text-gray-800 mb-1">
               {isLogin ? 'Welcome back to' : 'Join'}
@@ -138,9 +176,7 @@ export default function AuthScreen() {
           {/* Form */}
           <div className="space-y-4">
             {/* Name field (register only) */}
-            <div className={`transition-all duration-300 ease-out ${
-              isLogin ? 'opacity-0 max-h-0 overflow-hidden' : 'opacity-100 max-h-16'
-            }`}>
+            {!isLogin && (
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <input
@@ -152,9 +188,9 @@ export default function AuthScreen() {
                   className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                 />
               </div>
-            </div>
+            )}
 
-            {/* Email field */}
+            {/* Email */}
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
@@ -168,7 +204,7 @@ export default function AuthScreen() {
               />
             </div>
 
-            {/* Password field */}
+            {/* Password */}
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
@@ -189,10 +225,8 @@ export default function AuthScreen() {
               </button>
             </div>
 
-            {/* Confirm Password field (register only) */}
-            <div className={`transition-all duration-300 ease-out ${
-              isLogin ? 'opacity-0 max-h-0 overflow-hidden' : 'opacity-100 max-h-16'
-            }`}>
+            {/* Confirm password (register only) */}
+            {!isLogin && (
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <input
@@ -211,9 +245,25 @@ export default function AuthScreen() {
                   {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-            </div>
+            )}
 
-            {/* Submit button */}
+            {/* Role selection (register only) */}
+            {!isLogin && (
+              <div>
+                <label className="block text-gray-600 mb-1">Role:</label>
+                <select
+                  name="role"
+                  value={formData.role}
+                  onChange={handleInputChange}
+                  className="w-full pl-3 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                >
+                  <option value="child">Child</option>
+                  <option value="parent">Parent</option>
+                </select>
+              </div>
+            )}
+
+            {/* Submit */}
             <button
               type="button"
               onClick={handleSubmit}

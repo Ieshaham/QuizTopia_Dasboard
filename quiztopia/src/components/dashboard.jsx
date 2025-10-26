@@ -2,14 +2,9 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
 import QuizCreationModal from './quizCreation';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 import { useNavigate } from 'react-router-dom';
 
-// Initialize the Supabase client
-const supabase = createClient(
-  'https://kypfswyeviskcfkksekp.supabase.co', 
-  'sb_publishable_HdnnG-pBApERIT9D0kctBA_oI1sSbPJ'
-);
 
 const QuizTopiaDashboard = () => {
   const [selectedStudent, setSelectedStudent] = useState('emma');

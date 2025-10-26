@@ -1,13 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, ArrowLeft, Save, AlertCircle, Edit2 } from 'lucide-react';
-import { createClient } from "@supabase/supabase-js";
-
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
+import { supabase } from './supabaseClient';
 
 export default function QuestionApprovalPage() {
   const location = useLocation();
@@ -19,26 +13,29 @@ export default function QuestionApprovalPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [debugInfo, setDebugInfo] = useState("");
 
   useEffect(() => {
-    // Get questions from navigation state (passed from GenerateQuestionsPage)
     const generatedQuestions = location.state?.questions || [];
     const subjectData = location.state?.subject || "";
     const gradeData = location.state?.grade || "";
 
     console.log("Received questions in approval page:", generatedQuestions);
+    console.log("Subject:", subjectData);
+    console.log("Grade:", gradeData);
 
     if (generatedQuestions.length > 0) {
-      // Transform Grok API questions to include editing state
       const transformedQuestions = generatedQuestions.map((q, idx) => ({
         ...q,
         id: idx,
-        approved: true, // Default all to approved
+        approved: true,
         editing: false,
         editedQuestion: q.question,
         editedOptions: [...q.options],
         editedCorrectAnswer: q.correct_answer,
-        editedExplanation: q.explanation || ""
+        editedExplanation: q.explanation || "",
+        order_position: idx + 1,
+        difficulty_level: q.difficulty_level || 1
       }));
 
       setQuestions(transformedQuestions);
@@ -95,65 +92,155 @@ export default function QuestionApprovalPage() {
 
   const handleSaveToDatabase = async () => {
     const approvedQuestions = questions.filter(q => q.approved);
-    
+
     if (approvedQuestions.length === 0) {
       setSaveError("Please approve at least one question before saving");
+      return;
+    }
+
+    if (!subject || !grade) {
+      setSaveError("Subject and grade information is missing");
       return;
     }
 
     setSaving(true);
     setSaveError("");
     setSaveSuccess(false);
+    setDebugInfo("");
 
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
+      // Step 1: Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError) throw new Error(`Auth error: ${authError.message}`);
+      if (!user?.id) throw new Error("User not authenticated");
 
-      // Prepare questions for the Edge Function
-      const questionsToSave = approvedQuestions.map(q => ({
-        question: q.question,
-        options: q.options,
-        correct_answer: q.correct_answer,
-        explanation: q.explanation,
-        user_id: user?.id || null,
-        lesson_id: null
+      console.log("✅ User authenticated:", user.id);
+      setDebugInfo(prev => prev + `✅ User authenticated: ${user.id}\n`);
+
+      // Step 2: Verify user profile exists and is a parent
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) {
+        console.log("Profile check error:", profileError);
+        setDebugInfo(prev => prev + `⚠️ Profile check: ${profileError.message}\n`);
+      }
+
+      if (profile) {
+        console.log("✅ User profile found, role:", profile.role);
+        setDebugInfo(prev => prev + `✅ User role: ${profile.role}\n`);
+      }
+
+      // Step 3: Create lesson with proper subject
+      console.log("Creating lesson with:", {
+        title: `${subject} - Grade ${grade}`,
+        subject: subject,
+        grade_level: parseInt(grade),
+        created_by: user.id
+      });
+
+      const { data: lessonData, error: lessonError } = await supabase
+        .from('lessons')
+        .insert({
+          title: `${subject} - Grade ${grade}`,
+          subject: subject,
+          grade_level: parseInt(grade),
+          description: `AI Generated questions for ${subject}`,
+          created_by: user.id,
+          is_active: true,
+          is_public: true
+        })
+        .select('id, title, subject, grade_level')
+        .single();
+
+      if (lessonError) {
+        console.error("Lesson creation error:", lessonError);
+        setDebugInfo(prev => prev + `❌ Lesson error: ${lessonError.message}\n`);
+        throw new Error(`Failed to create lesson: ${lessonError.message}`);
+      }
+
+      console.log("✅ Lesson created:", lessonData);
+      setDebugInfo(prev => prev + `✅ Lesson created: ${lessonData.id}\n`);
+      setDebugInfo(prev => prev + `   Subject: ${lessonData.subject}\n`);
+
+      const lesson_id = lessonData.id;
+
+      // Step 4: Prepare questions data
+      const questionsToSave = approvedQuestions.map((q, index) => ({
+        question_text: q.question || q.editedQuestion,
+        options: q.options || q.editedOptions,
+        correct_answer: q.correct_answer || q.editedCorrectAnswer,
+        explanation: q.explanation || q.editedExplanation || "",
+        order_position: index + 1,
+        difficulty_level: q.difficulty_level || 1,
+        question_type: 'multiple_choice'
       }));
 
-      console.log("Saving approved questions:", questionsToSave);
+      console.log("Prepared questions to save:", questionsToSave);
+      setDebugInfo(prev => prev + `📝 Prepared ${questionsToSave.length} questions\n`);
 
-      // Call Edge Function to save with service role permissions
-      const { data, error } = await supabase.functions.invoke(
+      // Step 5: Save questions via edge function
+      console.log("Calling save-approved-questions function...");
+      setDebugInfo(prev => prev + `🔄 Calling edge function...\n`);
+
+      const { data: saveData, error: saveError } = await supabase.functions.invoke(
         "save-approved-questions",
         {
-          body: { questions: questionsToSave }
+          body: JSON.stringify({
+            questions: questionsToSave,
+            lesson_id: lesson_id,
+            parent_id: user.id
+          })
         }
       );
 
-      if (error) {
-        console.error("Edge function error:", error);
-        throw new Error(error.message);
+      console.log("Edge function response:", saveData);
+      
+      if (saveError) {
+        console.error("Edge function error:", saveError);
+        setDebugInfo(prev => prev + `❌ Edge function error: ${saveError.message}\n`);
+        throw new Error(`Edge function error: ${saveError.message}`);
       }
 
-      if (!data.success) {
-        throw new Error(data.error || "Failed to save questions");
+      if (!saveData?.success) {
+        const errorMsg = saveData?.error || "Unknown error from edge function";
+        console.error("Save failed:", errorMsg);
+        setDebugInfo(prev => prev + `❌ Save failed: ${errorMsg}\n`);
+        throw new Error(errorMsg);
+      }
+
+      console.log("✅ Questions saved successfully!");
+      setDebugInfo(prev => prev + `✅ Successfully saved ${questionsToSave.length} questions!\n`);
+
+      // Step 6: Verify questions were saved
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('questions')
+        .select('id, question_text, lesson_id')
+        .eq('lesson_id', lesson_id);
+
+      if (verifyData) {
+        console.log("✅ Verification: Found", verifyData.length, "questions in DB");
+        setDebugInfo(prev => prev + `✅ Verified: ${verifyData.length} questions in database\n`);
       }
 
       setSaveSuccess(true);
-      console.log(`Successfully saved ${data.count} approved questions!`);
-      
-      // Navigate to dashboard after 2 seconds
+
       setTimeout(() => {
-        navigate('/dashboard', { 
-          state: { 
-            message: `Successfully saved ${data.count} questions!`,
+        navigate('/dashboard', {
+          state: {
+            message: `Successfully saved ${questionsToSave.length} questions for ${subject}!`,
             type: 'success'
-          } 
+          }
         });
       }, 2000);
-      
-    } catch (error) {
-      console.error("Error saving questions:", error);
-      setSaveError(error.message || "Failed to save questions to database");
+
+    } catch (err) {
+      console.error("❌ Error saving questions:", err);
+      setSaveError(err.message || "Failed to save questions to database");
+      setDebugInfo(prev => prev + `❌ Error: ${err.message}\n`);
     } finally {
       setSaving(false);
     }
@@ -161,7 +248,6 @@ export default function QuestionApprovalPage() {
 
   const approvedCount = questions.filter(q => q.approved).length;
 
-  // Show message when no questions are passed
   if (questions.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-cyan-50 p-6 flex items-center justify-center">
@@ -228,7 +314,7 @@ export default function QuestionApprovalPage() {
                 ) : (
                   <>
                     <Save className="w-5 h-5" />
-                    <span>Save Approved Questions</span>
+                    <span>Save to {subject}</span>
                   </>
                 )}
               </button>
@@ -236,11 +322,19 @@ export default function QuestionApprovalPage() {
           </div>
         </div>
 
+        {/* Debug Info */}
+        {debugInfo && (
+          <div className="mb-6 p-4 bg-gray-50 border border-gray-300 rounded-xl">
+            <h3 className="font-semibold text-gray-700 mb-2">Debug Log:</h3>
+            <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">{debugInfo}</pre>
+          </div>
+        )}
+
         {/* Success Message */}
         {saveSuccess && (
           <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-xl flex items-start space-x-2">
             <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <span>Successfully saved {approvedCount} approved questions to the database!</span>
+            <span>Successfully saved {approvedCount} approved questions to {subject}!</span>
           </div>
         )}
 
@@ -248,7 +342,10 @@ export default function QuestionApprovalPage() {
         {saveError && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-start space-x-2">
             <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <span>{saveError}</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Error saving questions:</p>
+              <p className="text-sm">{saveError}</p>
+            </div>
           </div>
         )}
 
@@ -264,7 +361,6 @@ export default function QuestionApprovalPage() {
               }`}
             >
               <div className="p-6">
-                {/* Question Header */}
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-start space-x-3 flex-1">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold flex-shrink-0 ${
@@ -282,7 +378,7 @@ export default function QuestionApprovalPage() {
                       />
                     ) : (
                       <p className="font-semibold text-lg text-gray-800 flex-1">
-                        {q.question}
+                        {q.question || q.editedQuestion}
                       </p>
                     )}
                   </div>
@@ -320,8 +416,8 @@ export default function QuestionApprovalPage() {
 
                 {/* Options */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 ml-13">
-                  {q.editedOptions.map((opt, i) => {
-                    const isCorrect = opt === q.editedCorrectAnswer;
+                  {(q.editedOptions || q.options || []).map((opt, i) => {
+                    const isCorrect = opt === (q.editedCorrectAnswer || q.correct_answer);
                     return (
                       <div key={i}>
                         {q.editing ? (
@@ -378,7 +474,7 @@ export default function QuestionApprovalPage() {
                 )}
 
                 {/* Explanation */}
-                {(q.explanation || q.editing) && (
+                {((q.explanation || q.editedExplanation) || q.editing) && (
                   <div className="ml-13 mt-3">
                     {q.editing ? (
                       <textarea
@@ -388,10 +484,10 @@ export default function QuestionApprovalPage() {
                         className="w-full p-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                         rows={2}
                       />
-                    ) : q.explanation && (
+                    ) : (q.explanation || q.editedExplanation) && (
                       <div className="bg-blue-50 border border-blue-200 px-4 py-2 rounded-lg">
                         <span className="text-sm font-medium text-blue-700">Explanation: </span>
-                        <span className="text-sm text-blue-900">{q.explanation}</span>
+                        <span className="text-sm text-blue-900">{q.explanation || q.editedExplanation}</span>
                       </div>
                     )}
                   </div>
@@ -410,9 +506,9 @@ export default function QuestionApprovalPage() {
               <ul className="space-y-1 text-sm text-gray-700">
                 <li>• Click the <CheckCircle className="w-4 h-4 inline text-green-600" /> or <XCircle className="w-4 h-4 inline text-gray-600" /> icon to approve or reject questions</li>
                 <li>• Click the <Edit2 className="w-4 h-4 inline text-gray-600" /> icon to edit question text, options, or explanations</li>
-                <li>• Only approved questions (with green checkmarks) will be saved to the database</li>
+                <li>• Only approved questions will be saved to the database under "{subject}"</li>
                 <li>• You can change the correct answer while editing by selecting a different radio button</li>
-                <li>• Questions are generated by Grok AI and should be reviewed before saving</li>
+                <li>• All questions will be linked to subject: <strong>{subject}</strong></li>
               </ul>
             </div>
           </div>

@@ -4,9 +4,9 @@ import QuizTopiaDashboard from './components/dashboard';
 import QuizCreationModal from './components/quizCreation';
 import QuestionApprovalPage from './components/questionApprovalPage';
 import SettingsPage from './components/settings';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-
+import StudentGame from './components/gaming/studentGame';
 import GenerateQuestionsPage from './components/generateQuestionsPage';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 function App() {
   return (
@@ -19,6 +19,11 @@ function App() {
         <Route path="/approval" element={<QuestionApprovalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
 
+        {/* Student Game Routes - both /game and /gaming paths supported */}
+        <Route path="/game/:subject" element={<StudentGame />} />
+        <Route path="/game" element={<StudentGame />} />
+        <Route path="/gaming/:subject" element={<StudentGame />} />
+        <Route path="/gaming" element={<StudentGame />} />
       </Routes>
     </Router>
   );
