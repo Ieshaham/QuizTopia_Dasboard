@@ -651,7 +651,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
+import { Brain, TrendingUp, Clock, BookOpen, User, Settings, HelpCircle } from 'lucide-react';
 import QuizCreationModal from './quizCreation';
 import { supabase } from './supabaseClient';
 import { useNavigate } from 'react-router-dom';
@@ -659,12 +659,11 @@ import { useNavigate } from 'react-router-dom';
 const QuizTopiaDashboard = () => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [students, setStudents] = useState([]);
   const [weeklyScores, setWeeklyScores] = useState([]);
   const [recentQuizzes, setRecentQuizzes] = useState([]);
   const [metrics, setMetrics] = useState({ averageScore: 0, quizzesDone: 0, learningTime: '0h' });
-  const [aiTip, setAiTip] = useState('Loading smart recommendations...');
-  const [loadingTip, setLoadingTip] = useState(false);
   const navigate = useNavigate();
 
   // Fetch students
@@ -941,9 +940,35 @@ Provide a friendly, actionable tip that focuses on their weakest area. Keep it b
     }
   };
 
-  return (
+return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Header */}
+      {/* Header */>
+      {/* Help Box */}
+      {isHelpOpen && (
+        <div className="bg-white rounded-lg shadow-lg p-6 mt-4 mx-6 border border-purple-200">
+          <h2
+            style={{ fontWeight: 'bold', fontSize: '1.5rem', color: '#6b21a8', marginBottom: '1rem' }}>Help & Documentation</h2>
+
+          <div>
+            <h3 style={{ fontWeight: 'bold', color: '#6b21a8' }}>Selecting a Student</h3>
+            <p>Use the dropdown to switch between profiles. <br/>
+            To add a new student, click on the gear icon on the menu to add</p>
+          </div>
+
+          <div>
+            <h3 style={{ fontWeight: 'bold', color: '#6b21a8' }}>Understanding Metrics</h3>
+            <p>The average score, are displayed in the metrics section and the individual ones shown onto the line graph.<br/>
+            Average Score: The average score across all quizzes taken.</p>
+          </div>
+
+          <div>
+            <h3 style={{ fontWeight: 'bold', color: '#6b21a8' }}>Creating Quizzes</h3>
+            <p>Use AI or manual creation options to create your own quizes. <br/>
+            Under the AI quiz creation mode, once the questions are made, use the checkmarks on the right to approve and disapprove questions.<br/>
+            In the same mode, you may edit individual questions before finalizing the quiz to post.</p>
+          </div>
+        </div>
+      )}
       <header className="bg-white/80 backdrop-blur-sm border-b border-purple-200 px-6 py-4 shadow-lg">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -951,7 +976,10 @@ Provide a friendly, actionable tip that focuses on their weakest area. Keep it b
             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
           </div>
           <div className="flex items-center space-x-4">
-            {/* <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" /> */}
+            <HelpCircle className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110"
+              title="Help"
+              onClick={() => setIsHelpOpen(!isHelpOpen)}
+            />
             <Settings
               className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110"
               onClick={() => navigate('/settings')}
@@ -965,7 +993,7 @@ Provide a friendly, actionable tip that focuses on their weakest area. Keep it b
           </div>
         </div>
       </header>
-
+                
       {/* Main Content */}
       <div className="px-6 py-8">
         {/* Student Selector */}
