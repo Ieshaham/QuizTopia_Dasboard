@@ -314,6 +314,341 @@
 // export default QuizTopiaDashboard;
 
 
+// import React, { useState, useEffect } from 'react';
+// import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+// import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
+// import QuizCreationModal from './quizCreation';
+// import { supabase } from './supabaseClient';
+// import { useNavigate } from 'react-router-dom';
+
+// const QuizTopiaDashboard = () => {
+//   const [selectedStudent, setSelectedStudent] = useState(null);
+//   const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+//   const [students, setStudents] = useState([]);
+//   const [weeklyScores, setWeeklyScores] = useState([]);
+//   const [recentQuizzes, setRecentQuizzes] = useState([]);
+//   const [metrics, setMetrics] = useState({ averageScore: 0, quizzesDone: 0, learningTime: '0h' });
+//   const navigate = useNavigate();
+
+//   // Fetch students
+//   useEffect(() => {
+//     const fetchStudents = async () => {
+//       const { data, error } = await supabase
+//         .from('user_profiles')
+//         .select('*')
+//         .eq('role', 'child');
+//       if (error) console.error('Fetch students error:', error);
+//       else {
+//         setStudents(data || []);
+//         if (!selectedStudent && data?.length) setSelectedStudent(data[0].id);
+//       }
+//     };
+//     fetchStudents();
+//   }, []);
+
+//   const currentStudent = students.find(s => s.id === selectedStudent);
+
+//   // Fetch dashboard data
+//   useEffect(() => {
+//     const fetchData = async () => {
+//       if (!currentStudent) return;
+
+//       try {
+//         // Weekly scores
+//         const { data: weekly, error: weeklyError } = await supabase
+//           .from('user_progress')
+//           .select('lesson_id, is_correct, completed_at')
+//           .eq('user_id', currentStudent.id)
+//           .order('completed_at', { ascending: true });
+//         if (weeklyError) console.error('Weekly scores error:', weeklyError);
+//         else {
+//           const weeklyFormatted = weekly.map(w => ({
+//             day: new Date(w.completed_at).toLocaleDateString(),
+//             score: w.is_correct ? 100 : 0
+//           }));
+//           setWeeklyScores(weeklyFormatted);
+//         }
+
+//         // Recent quizzes
+//         const { data: recent, error: recentError } = await supabase
+//           .from('user_progress')
+//           .select(`
+//             lesson_id (
+//               title,
+//               subject
+//             ),
+//             is_correct,
+//             completed_at
+//           `)
+//           .eq('user_id', currentStudent.id)
+//           .order('completed_at', { ascending: false })
+//           .limit(5);
+//         if (recentError) console.error('Recent quizzes error:', recentError);
+//         else {
+//           setRecentQuizzes(recent.map(r => ({
+//             subject: r.lesson_id.subject || 'Unknown',
+//             time: new Date(r.completed_at).toLocaleTimeString(),
+//             score: r.is_correct ? 100 : 0
+//           })));
+//         }
+
+//         // Metrics
+//         const avgScore = weekly?.length
+//           ? Math.round(weekly.reduce((acc, w) => acc + (w.is_correct ? 100 : 0), 0) / weekly.length)
+//           : 0;
+//         const quizzesDone = recent?.length || 0;
+//         setMetrics({ averageScore: avgScore, quizzesDone, learningTime: '2.5h' });
+//       } catch (err) {
+//         console.error('Fetch dashboard data error:', err);
+//       }
+//     };
+
+//     fetchData();
+//   }, [currentStudent]);
+
+//   // Submit Quiz (create lesson + questions + choices)
+//   const submitQuizToSupabase = async ({ newLesson, questions }) => {
+//     try {
+//       // 1️⃣ Create lesson
+//       const { data: lessonData, error: lessonError } = await supabase
+//         .from('lessons')
+//         .insert({
+//           title: newLesson.title,
+//           subject: newLesson.subject,
+//           grade_level: parseInt(newLesson.gradeLevel),
+//           description: newLesson.description,
+//           duration_minutes: 15,
+//           created_by: supabase.auth.user()?.id,
+//           is_active: true
+//         })
+//         .select()
+//         .single();
+//       if (lessonError) throw lessonError;
+
+//       // 2️⃣ Insert questions
+//       for (let i = 0; i < questions.length; i++) {
+//         const q = questions[i];
+//         let videoUrl = null;
+
+//         // Upload video if exists
+//         if (q.videoFile) {
+//           const fileExt = q.videoFile.name.split('.').pop();
+//           const fileName = `${lessonData.id}/${Date.now()}.${fileExt}`;
+//           const { data: uploadData, error: uploadError } = await supabase.storage
+//             .from('lesson-videos')
+//             .upload(fileName, q.videoFile);
+//           if (uploadError) console.error('Video upload error:', uploadError);
+//           else videoUrl = supabase.storage.from('lesson-videos').getPublicUrl(uploadData.path).data.publicUrl;
+//         }
+
+//         const difficultyMap = { easy: 1, medium: 3, hard: 5 };
+//         const { data: questionData, error: questionError } = await supabase
+//           .from('questions')
+//           .insert({
+//             lesson_id: lessonData.id,
+//             question_text: q.questionText,
+//             question_type: q.questionType,
+//             correct_answer: q.correctAnswer,
+//             explanation: q.explanation || null,
+//             video_url: videoUrl,
+//             difficulty_level: difficultyMap[q.difficultyLevel] || 3,
+//             order_position: i + 1
+//           })
+//           .select()
+//           .single();
+//         if (questionError) throw questionError;
+
+//         // Insert multiple choice answer options
+//         if (q.questionType === 'multiple_choice' && q.answerChoices?.length) {
+//           const choices = q.answerChoices.map((c, idx) => ({
+//             question_id: questionData.id,
+//             choice_text: c,
+//             is_correct: c.trim() === q.correctAnswer.trim(),
+//             choice_order: idx + 1
+//           }));
+//           if (choices.length) {
+//             const { error: choicesError } = await supabase.from('answer_choices').insert(choices);
+//             if (choicesError) throw choicesError;
+//           }
+//         }
+//       }
+
+//       alert(`Quiz "${newLesson.title}" created successfully!`);
+//     } catch (err) {
+//       console.error('Submit quiz error:', err);
+//       alert(`Error creating quiz: ${err.message}`);
+//     }
+//   };
+
+//   return (
+//     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+//       {/* Header */}
+//       <header className="bg-white/80 backdrop-blur-sm border-b border-purple-200 px-6 py-4 shadow-lg">
+//         <div className="flex items-center justify-between">
+//           <div className="flex items-center space-x-2">
+//             <img src="/quiztopia-logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+//             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
+//           </div>
+//           <div className="flex items-center space-x-4">
+//             <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
+//             <Settings
+//               className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110"
+//               onClick={() => navigate('/settings')}
+//             />
+//             <div className="flex items-center space-x-2">
+//               <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+//                 <User className="w-5 h-5 text-white" />
+//               </div>
+//               <span className="text-sm font-medium text-purple-700">Parent Portal</span>
+//             </div>
+//           </div>
+//         </div>
+//       </header>
+
+//       {/* Main Content */}
+//       <div className="px-6 py-8">
+//         {/* Student Selector */}
+//         <div className="mb-8">
+//           <label className="block text-sm font-medium text-purple-700 mb-2">Select Student</label>
+//           <select
+//             value={selectedStudent || ''}
+//             onChange={(e) => setSelectedStudent(e.target.value)}
+//             className="px-4 py-2 border border-purple-300 rounded-xl bg-white/70 backdrop-blur-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 shadow-lg"
+//           >
+//             {students.map(student => (
+//               <option key={student.id} value={student.id}>
+//                 {student.display_name} - Age {student.age || 'N/A'}
+//               </option>
+//             ))}
+//           </select>
+//         </div>
+
+//         {/* Metrics */}
+//         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+//           <div className="bg-gradient-to-br from-white to-yellow-50 rounded-2xl p-6 shadow-xl border border-yellow-200 hover:shadow-2xl hover:scale-105 transition-all duration-300">
+//             <div className="flex items-center justify-between">
+//               <div>
+//                 <p className="text-sm font-medium text-gray-600">Average Score</p>
+//                 <p className="text-3xl font-bold bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent mt-1">{metrics.averageScore}%</p>
+//                 <p className="text-sm text-yellow-600">Overall Performance</p>
+//               </div>
+//               <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg animate-bounce">
+//                 <TrendingUp className="w-6 h-6 text-white" />
+//               </div>
+//             </div>
+//           </div>
+
+//           <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl p-6 shadow-xl border border-blue-200 hover:shadow-2xl hover:scale-105 transition-all duration-300">
+//             <div className="flex items-center justify-between">
+//               <div>
+//                 <p className="text-sm font-medium text-gray-600">Today's Time</p>
+//                 <p className="text-3xl font-bold bg-gradient-to-r from-blue-500 to-cyan-500 bg-clip-text text-transparent mt-1">{metrics.learningTime}</p>
+//                 <p className="text-sm text-blue-600">Learning Time</p>
+//               </div>
+//               <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg animate-spin" style={{ animationDuration: '3s' }}>
+//                 <Clock className="w-6 h-6 text-white" />
+//               </div>
+//             </div>
+//           </div>
+
+//           <div className="bg-gradient-to-br from-white to-purple-50 rounded-2xl p-6 shadow-xl border border-purple-200 hover:shadow-2xl hover:scale-105 transition-all duration-300">
+//             <div className="flex items-center justify-between">
+//               <div>
+//                 <p className="text-sm font-medium text-gray-600">Quizzes Done</p>
+//                 <p className="text-3xl font-bold bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent mt-1">{metrics.quizzesDone}</p>
+//                 <p className="text-sm text-purple-600">This Week</p>
+//               </div>
+//               <div className="w-12 h-12 bg-gradient-to-br from-purple-400 to-pink-500 rounded-xl flex items-center justify-center shadow-lg animate-pulse">
+//                 <BookOpen className="w-6 h-6 text-white" />
+//               </div>
+//             </div>
+//           </div>
+//         </div>
+
+//         {/* Weekly Chart */}
+//         <div className="bg-gradient-to-br from-white to-indigo-50 rounded-2xl p-6 shadow-xl border border-indigo-200 mb-8">
+//           <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">📈 This Week's Progress</h3>
+//           <div className="h-64">
+//             <ResponsiveContainer width="100%" height="100%">
+//               <LineChart data={weeklyScores} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+//                 <defs>
+//                   <linearGradient id="progressGradient" x1="0" y1="0" x2="1" y2="0">
+//                     <stop offset="0%" stopColor="#3b82f6" />
+//                     <stop offset="50%" stopColor="#8b5cf6" />
+//                     <stop offset="100%" stopColor="#ec4899" />
+//                   </linearGradient>
+//                 </defs>
+//                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+//                 <XAxis dataKey="day" stroke="#6b7280" />
+//                 <YAxis stroke="#6b7280" />
+//                 <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} />
+//                 <Line type="monotone" dataKey="score" stroke="url(#progressGradient)" strokeWidth={4} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+//               </LineChart>
+//             </ResponsiveContainer>
+//           </div>
+//         </div>
+
+//         {/* Recent Quizzes & AI Tip */}
+//         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+//           <div className="bg-gradient-to-br from-white to-pink-50 rounded-2xl p-6 shadow-xl border border-pink-200">
+//             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">🎯 Recent Quizzes</h3>
+//             <div className="space-y-4">
+//               {recentQuizzes.map((quiz, idx) => (
+//                 <div key={idx} className="flex items-center justify-between p-4 border border-pink-100 rounded-xl hover:bg-pink-50 transition-all hover:scale-102 bg-white/50 backdrop-blur-sm">
+//                   <div>
+//                     <h4 className="font-bold text-gray-800">{quiz.subject}</h4>
+//                     <p className="text-sm text-pink-600">{quiz.time}</p>
+//                   </div>
+//                   <div className="text-right">
+//                     <p className="text-2xl font-bold bg-gradient-to-r from-pink-500 to-purple-500 bg-clip-text text-transparent">{quiz.score}%</p>
+//                   </div>
+//                 </div>
+//               ))}
+//             </div>
+//           </div>
+
+//           <div className="bg-gradient-to-br from-yellow-100 via-amber-100 to-orange-100 rounded-2xl p-6 border-2 border-yellow-300 shadow-xl">
+//             <div className="flex items-center space-x-3 mb-4">
+//               <div className="w-10 h-10 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg animate-bounce">
+//                 <Brain className="w-6 h-6 text-white" />
+//               </div>
+//               <h3 className="text-lg font-bold text-gray-800">AI Smart Tip</h3>
+//             </div>
+//             <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-yellow-300 mb-4 shadow-lg">
+//               <p className="text-gray-800 font-medium">
+//                 Focus on multiplication tables - this will help {currentStudent?.display_name || 'the student'}'s math scores! 🚀
+//               </p>
+//             </div>
+
+//             <button
+//               onClick={() => navigate('/generate-questions')}
+//               className="w-full mb-3 bg-gradient-to-r from-green-400 to-teal-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg"
+//             >
+//               📝 Generate AI Questions
+//             </button>
+
+//             <button
+//               onClick={() => setIsQuizModalOpen(true)}
+//               className="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white py-3 px-4 rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 font-bold shadow-lg"
+//             >
+//               ✨ Create Practice Quiz
+//             </button>
+//           </div>
+//         </div>
+
+//         {/* Quiz Modal */}
+//         <QuizCreationModal
+//           isOpen={isQuizModalOpen}
+//           onClose={() => setIsQuizModalOpen(false)}
+//           onSubmit={submitQuizToSupabase}
+//         />
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default QuizTopiaDashboard;
+
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Brain, TrendingUp, Clock, BookOpen, User, Settings, Bell } from 'lucide-react';
@@ -328,6 +663,8 @@ const QuizTopiaDashboard = () => {
   const [weeklyScores, setWeeklyScores] = useState([]);
   const [recentQuizzes, setRecentQuizzes] = useState([]);
   const [metrics, setMetrics] = useState({ averageScore: 0, quizzesDone: 0, learningTime: '0h' });
+  const [aiTip, setAiTip] = useState('Loading smart recommendations...');
+  const [loadingTip, setLoadingTip] = useState(false);
   const navigate = useNavigate();
 
   // Fetch students
@@ -348,63 +685,187 @@ const QuizTopiaDashboard = () => {
 
   const currentStudent = students.find(s => s.id === selectedStudent);
 
-  // Fetch dashboard data
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!currentStudent) return;
+// Replace the "Fetch dashboard data" useEffect in your Dashboard component with this:
 
-      try {
-        // Weekly scores
-        const { data: weekly, error: weeklyError } = await supabase
-          .from('user_progress')
-          .select('lesson_id, is_correct, completed_at')
-          .eq('user_id', currentStudent.id)
-          .order('completed_at', { ascending: true });
-        if (weeklyError) console.error('Weekly scores error:', weeklyError);
-        else {
-          const weeklyFormatted = weekly.map(w => ({
-            day: new Date(w.completed_at).toLocaleDateString(),
-            score: w.is_correct ? 100 : 0
-          }));
-          setWeeklyScores(weeklyFormatted);
-        }
+useEffect(() => {
+  const fetchData = async () => {
+    if (!currentStudent) return;
 
-        // Recent quizzes
-        const { data: recent, error: recentError } = await supabase
-          .from('user_progress')
-          .select(`
-            lesson_id (
-              title,
-              subject
-            ),
-            is_correct,
-            completed_at
-          `)
-          .eq('user_id', currentStudent.id)
-          .order('completed_at', { ascending: false })
-          .limit(5);
-        if (recentError) console.error('Recent quizzes error:', recentError);
-        else {
-          setRecentQuizzes(recent.map(r => ({
-            subject: r.lesson_id.subject || 'Unknown',
-            time: new Date(r.completed_at).toLocaleTimeString(),
-            score: r.is_correct ? 100 : 0
-          })));
-        }
+    try {
+      // Weekly scores - aggregate by day
+      const { data: weekly, error: weeklyError } = await supabase
+        .from('user_progress')
+        .select('lesson_id, is_correct, completed_at, time_spent_seconds')
+        .eq('user_id', currentStudent.id)
+        .order('completed_at', { ascending: true });
+      if (weeklyError) console.error('Weekly scores error:', weeklyError);
+      else {
+        // Group by day and calculate average
+        const scoresByDay = {};
+        weekly.forEach(w => {
+          const day = new Date(w.completed_at).toLocaleDateString();
+          if (!scoresByDay[day]) scoresByDay[day] = { total: 0, count: 0 };
+          scoresByDay[day].total += w.is_correct ? 100 : 0;
+          scoresByDay[day].count += 1;
+        });
+        const weeklyFormatted = Object.keys(scoresByDay).map(day => ({
+          day,
+          score: Math.round(scoresByDay[day].total / scoresByDay[day].count)
+        }));
+        setWeeklyScores(weeklyFormatted);
+      }
 
-        // Metrics
+      // Recent quizzes - group by lesson
+      const { data: recent, error: recentError } = await supabase
+        .from('user_progress')
+        .select(`
+          lesson_id,
+          is_correct,
+          completed_at,
+          time_spent_seconds,
+          lessons!inner (
+            title,
+            subject
+          )
+        `)
+        .eq('user_id', currentStudent.id)
+        .order('completed_at', { ascending: false });
+      if (recentError) console.error('Recent quizzes error:', recentError);
+      else {
+        // Group by lesson_id to show unique quizzes
+        const lessonMap = {};
+        let totalTimeSpent = 0;
+        
+        recent.forEach(r => {
+          if (!lessonMap[r.lesson_id]) {
+            lessonMap[r.lesson_id] = {
+              subject: r.lessons.subject || r.lessons.title || 'Unknown',
+              time: new Date(r.completed_at).toLocaleString(),
+              correct: 0,
+              total: 0,
+              timeSpent: 0
+            };
+          }
+          lessonMap[r.lesson_id].total += 1;
+          if (r.is_correct) lessonMap[r.lesson_id].correct += 1;
+          
+          // Accumulate time spent
+          const timeInSeconds = r.time_spent_seconds || 0;
+          lessonMap[r.lesson_id].timeSpent += timeInSeconds;
+          totalTimeSpent += timeInSeconds;
+        });
+        
+        const uniqueQuizzes = Object.values(lessonMap)
+          .map(q => ({
+            subject: q.subject,
+            time: q.time,
+            score: Math.round((q.correct / q.total) * 100)
+          }))
+          .slice(0, 5);
+        setRecentQuizzes(uniqueQuizzes);
+
+        // Calculate metrics
         const avgScore = weekly?.length
           ? Math.round(weekly.reduce((acc, w) => acc + (w.is_correct ? 100 : 0), 0) / weekly.length)
           : 0;
-        const quizzesDone = recent?.length || 0;
-        setMetrics({ averageScore: avgScore, quizzesDone, learningTime: '2.5h' });
-      } catch (err) {
-        console.error('Fetch dashboard data error:', err);
-      }
-    };
+        const quizzesDone = Object.keys(lessonMap || {}).length;
+        
+        // Format total time spent into hours and minutes
+        const totalMinutes = Math.floor(totalTimeSpent / 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        
+        let formattedTime;
+        if (hours > 0) {
+          formattedTime = minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+        } else if (minutes > 0) {
+          formattedTime = `${minutes}m`;
+        } else {
+          formattedTime = `${totalTimeSpent}s`;
+        }
+        
+        setMetrics({ 
+          averageScore: avgScore, 
+          quizzesDone, 
+          learningTime: formattedTime 
+        });
 
-    fetchData();
-  }, [currentStudent]);
+        // Generate AI tip based on recent performance
+        generateAITip(recent, currentStudent);
+      }
+    } catch (err) {
+      console.error('Fetch dashboard data error:', err);
+    }
+  };
+
+  fetchData();
+}, [currentStudent]);
+
+
+  // Generate AI-powered smart tip using Grok AI
+  const generateAITip = async (recentData, student) => {
+    if (!recentData || recentData.length === 0) {
+      setAiTip(`Start taking quizzes to get personalized recommendations!`);
+      return;
+    }
+
+    setLoadingTip(true);
+    try {
+      // Analyze performance by subject
+      const subjectPerformance = {};
+      recentData.forEach(r => {
+        const subject = r.lessons?.subject || 'General';
+        if (!subjectPerformance[subject]) {
+          subjectPerformance[subject] = { correct: 0, total: 0 };
+        }
+        subjectPerformance[subject].total += 1;
+        if (r.is_correct) subjectPerformance[subject].correct += 1;
+      });
+
+      const performanceText = Object.entries(subjectPerformance)
+        .map(([subject, stats]) => `${subject}: ${stats.correct}/${stats.total} correct`)
+        .join(', ');
+
+      // Call Grok AI API to generate personalized tip
+      const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.REACT_APP_GROK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'grok-beta',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an educational AI assistant that provides brief, encouraging learning tips for students.'
+            },
+            {
+              role: 'user',
+              content: `Based on this student's recent quiz performance, provide ONE specific, encouraging tip (2-3 sentences max) to help them improve.
+
+Student: ${student?.display_name || 'Student'}
+Age: ${student?.age || 'N/A'}
+Recent Performance: ${performanceText}
+
+Provide a friendly, actionable tip that focuses on their weakest area. Keep it brief and motivating. Add a relevant emoji at the end.`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 150
+        })
+      });
+
+      const data = await response.json();
+      const tip = data.choices?.[0]?.message?.content || 'Keep practicing to improve your scores! 🚀';
+      setAiTip(tip);
+    } catch (err) {
+      console.error('AI tip generation error:', err);
+      setAiTip('Keep up the great work! Practice makes perfect! 🌟');
+    } finally {
+      setLoadingTip(false);
+    }
+  };
 
   // Submit Quiz (create lesson + questions + choices)
   const submitQuizToSupabase = async ({ newLesson, questions }) => {
@@ -490,7 +951,7 @@ const QuizTopiaDashboard = () => {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent animate-pulse">QuizTopia</h1>
           </div>
           <div className="flex items-center space-x-4">
-            <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" />
+            {/* <Bell className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110" /> */}
             <Settings
               className="w-6 h-6 text-purple-600 hover:text-purple-800 cursor-pointer transition-all hover:scale-110"
               onClick={() => navigate('/settings')}
@@ -517,7 +978,7 @@ const QuizTopiaDashboard = () => {
           >
             {students.map(student => (
               <option key={student.id} value={student.id}>
-                {student.display_name} - Age {student.age || 'N/A'}
+                {student.display_name}
               </option>
             ))}
           </select>
@@ -615,9 +1076,11 @@ const QuizTopiaDashboard = () => {
               <h3 className="text-lg font-bold text-gray-800">AI Smart Tip</h3>
             </div>
             <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-yellow-300 mb-4 shadow-lg">
-              <p className="text-gray-800 font-medium">
-                Focus on multiplication tables - this will help {currentStudent?.display_name || 'the student'}'s math scores! 🚀
-              </p>
+              {loadingTip ? (
+                <p className="text-gray-600 italic animate-pulse">Analyzing performance...</p>
+              ) : (
+                <p className="text-gray-800 font-medium">{aiTip}</p>
+              )}
             </div>
 
             <button
