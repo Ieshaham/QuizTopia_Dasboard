@@ -944,81 +944,127 @@
 
 // export default PhaserQuizGame;
 
-
-
-
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Phaser from 'phaser';
-import { fetchQuestionsBySubject } from '../gaming/api';
 import { supabase } from '../supabaseClient';
 
 // ============================================
-// DATABASE INTEGRATION - FIXED FOR RLS
+// FETCH QUESTIONS FROM DATABASE
 // ============================================
 
-/**
- * Save game progress - uses existing lessons, doesn't create new ones
- */
-const saveGameProgress = async (gameData, subjectValue, userId) => {
+export const fetchQuestionsBySubject = async (subjectValue) => {
   try {
-    const { questionResults, correctAnswers, totalQuestions, timeSpent } = gameData;
-    
-    const currentUserId = userId || (await supabase.auth.getUser()).data.user?.id;
-    
-    if (!currentUserId) {
-      console.log('No authenticated user, skipping save');
-      return { success: false, error: 'No authenticated user' };
+    console.log('🔍 Fetching questions for subject:', subjectValue);
+
+    // Fetch questions using a JOIN with lessons table (case-insensitive)
+    const { data: questions, error: questionError } = await supabase
+      .from('questions')
+      .select(`
+        *,
+        lessons!inner(subject)
+      `)
+      .ilike('lessons.subject', subjectValue)
+      .eq('approval_status', 'approved')
+      .order('order_position', { ascending: true });
+
+    if (questionError) {
+      console.error('❌ Error fetching questions:', questionError);
+      return [];
     }
 
-    // Find existing lessons for this subject
-    const { data: lessons, error: lessonError } = await supabase
-      .from('lessons')
-      .select('id')
-      .eq('subject', subjectValue)
-      .eq('is_active', true)
-      .limit(1);
+    console.log('✅ Questions found:', questions?.length || 0);
 
-    if (lessonError || !lessons || lessons.length === 0) {
-      console.log('No lesson found for subject:', subjectValue);
-      return { success: false, error: 'No lesson found' };
+    if (!questions || questions.length === 0) {
+      console.warn('⚠️ No approved questions found for subject:', subjectValue);
+      return [];
     }
 
-    const lessonId = lessons[0].id;
+    // Format questions with options
+    const formattedQuestions = questions.map((q) => {
+      // Parse options from jsonb field
+      let options = [];
+      
+      if (q.options) {
+        if (Array.isArray(q.options)) {
+          options = q.options;
+        } else if (typeof q.options === 'string') {
+          try {
+            options = JSON.parse(q.options);
+          } catch (e) {
+            console.error('Failed to parse options for question:', q.id, e);
+            options = [];
+          }
+        }
+      }
+      
+      if (options.length === 0) {
+        console.warn('⚠️ Question has no options array:', q.id);
+        options = [q.correct_answer, 'Option B', 'Option C', 'Option D'];
+      }
 
-    // Calculate concentration score
-    const accuracy = (correctAnswers / totalQuestions) * 100;
-    const avgTimePerQuestion = timeSpent / totalQuestions;
-    const speedScore = Math.max(0, 100 - (avgTimePerQuestion * 2));
-    const concentrationScore = Math.round((accuracy * 0.7) + (speedScore * 0.3));
+      // Extract just the answer text without the letter prefix (e.g., "A) $2" -> "$2")
+      const correctAnswerText = q.correct_answer.includes(')') 
+        ? q.correct_answer.split(')')[1].trim()
+        : q.correct_answer;
 
-    // Create progress records from question results
-    const progressRecords = questionResults.map(result => ({
-      user_id: currentUserId,
-      lesson_id: lessonId,
+      // Clean up options by removing letter prefixes
+      const cleanedOptions = options.map(opt => {
+        if (typeof opt === 'string' && opt.includes(')')) {
+          return opt.split(')')[1].trim();
+        }
+        return opt;
+      });
+
+      return {
+        id: q.id,
+        lesson_id: q.lesson_id, // Keep the lesson_id
+        question: q.question_text,
+        options: cleanedOptions,
+        correct_answer: correctAnswerText,
+        explanation: q.explanation || `The correct answer is: ${correctAnswerText}`,
+      };
+    });
+
+    console.log('✅ Formatted questions ready:', formattedQuestions.length);
+    return formattedQuestions;
+  } catch (error) {
+    console.error('❌ Error in fetchQuestionsBySubject:', error);
+    return [];
+  }
+};
+
+// Save game progress to database
+const saveGameProgress = async (gameResults, subject, userId) => {
+  try {
+    // Insert a row for each question answered
+    const progressRecords = gameResults.questionResults.map(result => ({
+      user_id: userId,
+      lesson_id: result.lessonId, // Now we have the lesson_id
       question_id: result.questionId,
+      user_answer: result.selectedAnswer,
       is_correct: result.isCorrect,
       time_spent_seconds: result.timeSpent,
-      concentration_score: concentrationScore,
       completed_at: new Date().toISOString()
     }));
 
     const { data, error } = await supabase
       .from('user_progress')
-      .upsert(progressRecords, { 
-        onConflict: 'user_id,lesson_id,question_id'
-      });
+      .insert(progressRecords);
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error saving progress:', error);
+      return { success: false, error };
+    }
 
-    console.log('✅ Game progress saved successfully!');
+    console.log(`✅ Saved ${progressRecords.length} question results to user_progress`);
     return { success: true, data };
-
   } catch (error) {
-    console.error('❌ Error saving game progress:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Error in saveGameProgress:', error);
+    return { success: false, error };
   }
 };
+
 
 // ============================================
 // PHASER GAME SCENE
@@ -1035,8 +1081,8 @@ class QuizRunnerScene extends Phaser.Scene {
     this.startTime = 0;
     this.playerX = 150;
     this.obstacles = [];
-    this.questionResults = []; // Track individual results
-    this.questionStartTime = 0; // Track time per question
+    this.questionResults = [];
+    this.questionStartTime = 0;
   }
 
   init(data) {
@@ -1111,12 +1157,10 @@ class QuizRunnerScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     this.createSounds();
 
-    // Sky background with gradient
     const sky = this.add.graphics();
     sky.fillGradientStyle(0x87ceeb, 0x87ceeb, 0xe0f7ff, 0xe0f7ff, 1);
     sky.fillRect(0, 0, width, height);
 
-    // Animated clouds
     for (let i = 0; i < 6; i++) {
       const cloud = this.add.ellipse(
         Phaser.Math.Between(0, width),
@@ -1135,21 +1179,13 @@ class QuizRunnerScene extends Phaser.Scene {
       });
     }
 
-    // Ground
     this.groundY = height - 100;
     this.add.rectangle(width / 2, this.groundY + 50, width, 100, 0x8b7355);
     this.add.rectangle(width / 2, this.groundY, width, 30, 0x90ee90);
 
-    // Finish line
     this.createFinishLine();
-
-    // Create player
     this.createPlayer();
-
-    // UI
     this.createUI();
-
-    // Display question
     this.displayQuestion();
   }
 
@@ -1157,28 +1193,22 @@ class QuizRunnerScene extends Phaser.Scene {
     const x = this.playerX;
     const y = this.groundY - 30;
     
-    // Body
     this.playerBody = this.add.circle(x, y, 28, 0xff6b6b);
-    
-    // Eyes
     this.playerEyeL = this.add.circle(x - 10, y - 8, 6, 0xffffff);
     this.playerEyeR = this.add.circle(x + 10, y - 8, 6, 0xffffff);
     this.playerPupilL = this.add.circle(x - 8, y - 8, 3, 0x000000);
     this.playerPupilR = this.add.circle(x + 12, y - 8, 3, 0x000000);
     
-    // Smile
     this.playerMouth = this.add.graphics();
     this.playerMouth.lineStyle(3, 0x000000);
     this.playerMouth.arc(x, y + 5, 10, Phaser.Math.DegToRad(0), Phaser.Math.DegToRad(180), false);
     this.playerMouth.strokePath();
     
-    // Arms
     this.playerArmL = this.add.rectangle(x - 20, y + 5, 8, 25, 0xff6b6b);
     this.playerArmL.setRotation(-0.3);
     this.playerArmR = this.add.rectangle(x + 20, y + 5, 8, 25, 0xff6b6b);
     this.playerArmR.setRotation(0.3);
     
-    // Legs
     this.playerLegL = this.add.rectangle(x - 12, y + 35, 10, 30, 0xff6b6b);
     this.playerLegR = this.add.rectangle(x + 12, y + 35, 10, 30, 0xff6b6b);
     
@@ -1188,7 +1218,6 @@ class QuizRunnerScene extends Phaser.Scene {
       this.playerArmL, this.playerArmR, this.playerLegL, this.playerLegR
     ];
 
-    // Idle animation - bobbing
     this.idleAnimation();
   }
 
@@ -1206,7 +1235,6 @@ class QuizRunnerScene extends Phaser.Scene {
       }
     });
     
-    // Arm swing
     this.tweens.add({
       targets: this.playerArmL,
       rotation: -0.5,
@@ -1233,7 +1261,6 @@ class QuizRunnerScene extends Phaser.Scene {
     
     this.finishPole = this.add.rectangle(x, this.groundY - 80, 8, 160, 0x8b4513);
     
-    // Checkered flag
     const flag = this.add.graphics();
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 5; col++) {
@@ -1259,7 +1286,6 @@ class QuizRunnerScene extends Phaser.Scene {
   createUI() {
     const { width } = this.cameras.main;
 
-    // Score
     this.scoreText = this.add.text(width - 20, 20, `⭐ ${this.score}`, {
       fontSize: '32px',
       fontFamily: 'Arial',
@@ -1269,7 +1295,6 @@ class QuizRunnerScene extends Phaser.Scene {
       strokeThickness: 4
     }).setOrigin(1, 0);
 
-    // Question counter
     this.questionCounter = this.add.text(20, 20, '', {
       fontSize: '24px',
       fontFamily: 'Arial',
@@ -1279,7 +1304,6 @@ class QuizRunnerScene extends Phaser.Scene {
       padding: { x: 16, y: 10 }
     });
 
-    // Progress bar
     this.progressBg = this.add.rectangle(width / 2, 70, width * 0.7, 35, 0x4b5563, 0.7);
     this.progressBg.setStrokeStyle(3, 0xffffff);
     this.progressFill = this.add.rectangle(
@@ -1305,10 +1329,8 @@ class QuizRunnerScene extends Phaser.Scene {
   }
 
   displayQuestion() {
-    // Record when question starts
     this.questionStartTime = Date.now();
 
-    // Clean up
     if (this.answerButtons) {
       this.answerButtons.forEach(btn => btn.container?.destroy());
     }
@@ -1318,7 +1340,6 @@ class QuizRunnerScene extends Phaser.Scene {
     [this.questionBg, this.questionText, this.explanationBox, 
      this.explanationText, this.nextButton].forEach(e => e?.destroy());
 
-    // Remove old obstacles
     this.obstacles.forEach(obs => {
       obs.forEach(part => part?.destroy());
     });
@@ -1330,10 +1351,8 @@ class QuizRunnerScene extends Phaser.Scene {
     this.questionCounter.setText(`Question ${this.currentQuestionIndex + 1}/${this.questions.length}`);
     this.updateProgress();
 
-    // Create obstacle for this question
     this.createObstacle();
 
-    // Question panel
     this.questionBg = this.add.rectangle(width / 2, 140, width * 0.88, 90, 0xffffff, 0.95);
     this.questionBg.setStrokeStyle(4, 0x8b5cf6);
     
@@ -1346,7 +1365,6 @@ class QuizRunnerScene extends Phaser.Scene {
       wordWrap: { width: width * 0.82 }
     }).setOrigin(0.5);
 
-    // Answer buttons
     const startY = 245;
     const spacing = 70;
 
@@ -1413,7 +1431,6 @@ class QuizRunnerScene extends Phaser.Scene {
     const obstacleX = this.playerX + 200;
     const obstacleY = this.groundY - 40;
     
-    // Rock obstacle
     const rock1 = this.add.circle(obstacleX, obstacleY, 25, 0x808080);
     const rock2 = this.add.circle(obstacleX - 15, obstacleY - 10, 18, 0x696969);
     const rock3 = this.add.circle(obstacleX + 15, obstacleY - 5, 15, 0x757575);
@@ -1429,9 +1446,9 @@ class QuizRunnerScene extends Phaser.Scene {
     const isCorrect = option === question.correct_answer;
     const timeSpent = Math.floor((Date.now() - this.questionStartTime) / 1000);
 
-    // ✅ TRACK THIS QUESTION'S RESULT
     this.questionResults.push({
       questionId: question.id,
+      lessonId: question.lesson_id, // Add lesson_id here
       isCorrect: isCorrect,
       timeSpent: timeSpent,
       selectedAnswer: option
@@ -1458,7 +1475,6 @@ class QuizRunnerScene extends Phaser.Scene {
       this.moveBackward();
     }
 
-    // Button feedback
     this.answerButtons.forEach(({ button: btn, text: txt, label: lbl, option: opt }) => {
       const correct = opt === question.correct_answer;
       const selected = opt === option;
@@ -1484,7 +1500,6 @@ class QuizRunnerScene extends Phaser.Scene {
   jumpOverObstacle() {
     this.jumpSound();
     
-    // Running leg animation
     this.tweens.add({
       targets: this.playerLegL,
       y: '-=15',
@@ -1501,7 +1516,6 @@ class QuizRunnerScene extends Phaser.Scene {
       delay: 50
     });
 
-    // Jump arc
     this.playerParts.forEach(part => {
       this.tweens.add({
         targets: part,
@@ -1518,7 +1532,6 @@ class QuizRunnerScene extends Phaser.Scene {
         }
       });
 
-      // Move forward
       this.tweens.add({
         targets: part,
         x: '+=180',
@@ -1533,13 +1546,11 @@ class QuizRunnerScene extends Phaser.Scene {
       });
     });
 
-    // Happy face
     this.playerMouth.clear();
     this.playerMouth.lineStyle(3, 0x000000);
     this.playerMouth.arc(this.playerBody.x, this.playerBody.y + 5, 12, Phaser.Math.DegToRad(180), Phaser.Math.DegToRad(0), true);
     this.playerMouth.strokePath();
 
-    // Remove obstacle
     this.time.delayedCall(500, () => {
       this.obstacles.forEach(obs => {
         obs.forEach(part => {
@@ -1554,7 +1565,6 @@ class QuizRunnerScene extends Phaser.Scene {
       });
     });
 
-    // Celebration particles
     for (let i = 0; i < 20; i++) {
       const particle = this.add.circle(
         this.playerX,
@@ -1576,13 +1586,11 @@ class QuizRunnerScene extends Phaser.Scene {
   }
 
   moveBackward() {
-    // Sad face
     this.playerMouth.clear();
     this.playerMouth.lineStyle(3, 0x000000);
     this.playerMouth.arc(this.playerBody.x, this.playerBody.y + 15, 10, Phaser.Math.DegToRad(0), Phaser.Math.DegToRad(180), false);
     this.playerMouth.strokePath();
 
-    // Stumble backward
     this.playerParts.forEach(part => {
       this.tweens.add({
         targets: part,
@@ -1598,7 +1606,6 @@ class QuizRunnerScene extends Phaser.Scene {
       });
     });
 
-    // Shake
     this.tweens.add({
       targets: this.playerBody,
       angle: -15,
@@ -1646,7 +1653,6 @@ class QuizRunnerScene extends Phaser.Scene {
       }
     ).setOrigin(0.5);
 
-    // Next button
     const isLast = this.currentQuestionIndex >= this.questions.length - 1;
     const btnText = isLast ? 'Finish Race! 🏁' : 'Next Question ➜';
     
@@ -1687,7 +1693,6 @@ class QuizRunnerScene extends Phaser.Scene {
       if (this.currentQuestionIndex < this.questions.length - 1) {
         this.currentQuestionIndex++;
         
-        // Reset face
         this.playerMouth.clear();
         this.playerMouth.lineStyle(3, 0x000000);
         this.playerMouth.arc(this.playerBody.x, this.playerBody.y + 5, 10, 0, Math.PI, false);
@@ -1699,7 +1704,6 @@ class QuizRunnerScene extends Phaser.Scene {
         this.celebrationSound();
         const timeSpent = Math.floor((Date.now() - this.startTime) / 1000);
         
-        // ✅ PASS questionResults TO onComplete
         this.onComplete({
           score: this.score,
           correctAnswers: this.correctAnswers,
@@ -1772,7 +1776,6 @@ const PhaserQuizGame = () => {
           questions,
           subject: subjectValue,
           onComplete: async (gameResults) => {
-            // ✅ SAVE TO DATABASE
             const { data: { user } } = await supabase.auth.getUser();
             
             if (user) {
@@ -1789,7 +1792,6 @@ const PhaserQuizGame = () => {
               }
             }
 
-            // Show results screen
             setResults(gameResults);
             setGameComplete(true);
           }
@@ -2001,4 +2003,4 @@ const PhaserQuizGame = () => {
   );
 };
 
-export default PhaserQuizGame
+export default PhaserQuizGame;
