@@ -8,9 +8,16 @@ import StudentGame from './components/gaming/studentGame';
 import GenerateQuestionsPage from './components/generateQuestionsPage';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
+// ⬅️ NEW IMPORT
+import FocusTracker from './focus/FocusTracker';
+
 function App() {
   return (
     <Router>
+
+      {/* 🔥 ALWAYS RUN face tracking in background */}
+      <FocusTracker />
+
       <Routes>
         <Route path="/" element={<AuthScreen />} />
         <Route path="/dashboard" element={<QuizTopiaDashboard />} />
@@ -19,7 +26,7 @@ function App() {
         <Route path="/approval" element={<QuestionApprovalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
 
-        {/* Student Game Routes - both /game and /gaming paths supported */}
+        {/* Student Game Routes */}
         <Route path="/game/:subject" element={<StudentGame />} />
         <Route path="/game" element={<StudentGame />} />
         <Route path="/gaming/:subject" element={<StudentGame />} />

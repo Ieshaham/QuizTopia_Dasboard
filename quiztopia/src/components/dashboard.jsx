@@ -664,6 +664,9 @@ const QuizTopiaDashboard = () => {
   const [weeklyScores, setWeeklyScores] = useState([]);
   const [recentQuizzes, setRecentQuizzes] = useState([]);
   const [metrics, setMetrics] = useState({ averageScore: 0, quizzesDone: 0, learningTime: '0h' });
+  const [aiTip, setAiTip] = useState("Loading AI tip...");
+  const [loadingTip, setLoadingTip] = useState(false);
+
   const navigate = useNavigate();
 
   // Fetch students
@@ -940,10 +943,12 @@ Provide a friendly, actionable tip that focuses on their weakest area. Keep it b
     }
   };
 
-return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Header */>
-      {/* Help Box */}
+
+    return (
+  <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+    {/* Header */}
+    {/* Help Box */}
+
       {isHelpOpen && (
         <div className="bg-white rounded-lg shadow-lg p-6 mt-4 mx-6 border border-purple-200">
           <h2

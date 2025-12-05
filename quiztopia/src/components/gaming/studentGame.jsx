@@ -1045,6 +1045,7 @@ const saveGameProgress = async (gameResults, subject, userId) => {
       user_answer: result.selectedAnswer,
       is_correct: result.isCorrect,
       time_spent_seconds: result.timeSpent,
+
       completed_at: new Date().toISOString()
     }));
 
@@ -1154,6 +1155,11 @@ class QuizRunnerScene extends Phaser.Scene {
   }
 
   create() {
+
+    if (window.enableFocusTracking) {
+      window.enableFocusTracking();
+    }
+
     const { width, height } = this.cameras.main;
     this.createSounds();
 
@@ -1703,14 +1709,28 @@ class QuizRunnerScene extends Phaser.Scene {
       } else {
         this.celebrationSound();
         const timeSpent = Math.floor((Date.now() - this.startTime) / 1000);
-        
-        this.onComplete({
-          score: this.score,
-          correctAnswers: this.correctAnswers,
-          totalQuestions: this.questions.length,
-          timeSpent: timeSpent,
-          questionResults: this.questionResults
-        });
+
+       // 🧠 STOP tracking and calculate final concentration score
+    if (window.disableFocusTracking) {
+      window.disableFocusTracking();
+    }
+
+    let finalFocusScore = 0;
+    if (window.getFinalFocusScore) {
+      finalFocusScore = window.getFinalFocusScore(); // 👉 returns 0-100
+    }
+
+    console.log("📊 Final Focus Score (Phaser):", finalFocusScore);
+
+    // ✅ PASS ALL DATA BACK TO REACT, INCLUDING FOCUS SCORE
+       this.onComplete({
+      score: this.score,
+      correctAnswers: this.correctAnswers,
+      totalQuestions: this.questions.length,
+      timeSpent: timeSpent,
+      questionResults: this.questionResults,
+      finalFocusScore: finalFocusScore   // <-- NEW
+    });
       }
     });
   }
@@ -1883,6 +1903,8 @@ const PhaserQuizGame = () => {
             <button
               onClick={() => {
                 setError(null);
+
+            
                 setSelectedSubject(null);
               }}
               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-xl hover:shadow-lg transition-all font-bold text-lg"
@@ -1949,6 +1971,14 @@ const PhaserQuizGame = () => {
               <div className="text-5xl font-bold text-yellow-600 mb-2">{formatTime(results.timeSpent)}</div>
               <div className="text-sm text-gray-700 font-semibold">Time</div>
             </div>
+
+            <div className="bg-gradient-to-br from-pink-100 to-red-200 p-6 rounded-2xl">
+              <div className="text-5xl font-bold text-red-600 mb-2">
+               {results.finalFocusScore !== undefined ? results.finalFocusScore : "--"}%
+  </div>
+  <div className="text-sm text-gray-700 font-semibold">Focus Score</div>
+</div>
+
           </div>
 
           <div className="flex gap-4">
@@ -1983,14 +2013,23 @@ const PhaserQuizGame = () => {
       <div className="mb-6">
         <button
           onClick={() => {
-            if (window.confirm('Are you sure you want to quit? Your progress will be lost.')) {
-              setSelectedSubject(null);
-              if (phaserGameRef.current) {
-                phaserGameRef.current.destroy(true);
-                phaserGameRef.current = null;
-              }
-            }
-          }}
+  if (window.confirm('Are you sure you want to quit? Your progress will be lost.')) {
+
+    // 🔴 STOP TRACKING when user exits early
+    if (window.disableFocusTracking) {
+      window.disableFocusTracking();
+      console.log("🛑 Focus tracking stopped (user quit early)");
+    }
+
+    setSelectedSubject(null);
+
+    if (phaserGameRef.current) {
+      phaserGameRef.current.destroy(true);
+      phaserGameRef.current = null;
+    }
+  }
+}}
+
           className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-xl font-bold text-lg backdrop-blur-sm border-2 border-white/30 transition-all"
         >
           ← Back to Subjects

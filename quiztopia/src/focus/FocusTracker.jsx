@@ -34,7 +34,7 @@ const FocusTracker = () => {
 
         intervalId = setInterval(async () => {
           // Only track when a game has turned it on
-          if (!window.focusTrackingEnabled) return;
+          
           if (!videoRef.current) return;
 
           const video = videoRef.current;
